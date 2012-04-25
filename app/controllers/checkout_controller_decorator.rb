@@ -73,7 +73,7 @@ CheckoutController.class_eval do
                                          :lastname   => @ppx_details.params["last_name"],
                                          :address1   => ship_address["address1"],
                                          :address2   => ship_address["address2"],
-                                         :city       => ship_address["city"],
+                                         :city_name       => ship_address["city"],
                                          :country    => Country.find_by_iso(ship_address["country"]),
                                          :zipcode    => ship_address["zip"],
                                          # phone is currently blanked in AM's PPX response lib
