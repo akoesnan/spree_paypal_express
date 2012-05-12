@@ -28,7 +28,7 @@ CheckoutController.class_eval do
   def paypal_payment
     load_order
     opts = all_opts(@order,params[:payment_method_id], 'payment')
-    opts.merge!(address_options(@order))
+        opts.merge!(address_options(@order))
     @gateway = paypal_gateway
 
     if Spree::Config[:auto_capture]
@@ -67,22 +67,28 @@ CheckoutController.class_eval do
 
       @order.special_instructions = @ppx_details.params["note"]
 
+=begin
       unless payment_method.preferred_no_shipping
         ship_address = @ppx_details.address
         order_ship_address = Address.new :firstname  => @ppx_details.params["first_name"],
                                          :lastname   => @ppx_details.params["last_name"],
                                          :address1   => ship_address["address1"],
                                          :address2   => ship_address["address2"],
-                                         :city_name       => ship_address["city"],
                                          :country    => Country.find_by_iso(ship_address["country"]),
                                          :zipcode    => ship_address["zip"],
                                          # phone is currently blanked in AM's PPX response lib
                                          :phone      => @ppx_details.params["phone"] || "(not given)"
 
-        if (state = State.find_by_abbr(ship_address["state"]))
+        if (state = State.find_by_name(ship_address["state"]))
           order_ship_address.state = state
         else
           order_ship_address.state_name = ship_address["state"]
+        end
+        
+        if (city = City.find_by_name(ship_address["city"]))
+          order_ship_address.city = city
+        else
+          order_ship_address.city_name = ship_address["city"]
         end
 
         order_ship_address.save!
@@ -90,6 +96,8 @@ CheckoutController.class_eval do
         @order.ship_address = order_ship_address
         @order.bill_address = order_ship_address unless @order.bill_address
       end
+=end
+
       @order.save
 
       if payment_method.preferred_review
@@ -116,9 +124,9 @@ CheckoutController.class_eval do
     gateway = paypal_gateway
 
     if Spree::Config[:auto_capture]
-      ppx_auth_response = gateway.purchase((@order.total*100).to_i, opts)
+      ppx_auth_response = gateway.purchase((@order.total_in_paypal_currency * 100).to_i, opts)
     else
-      ppx_auth_response = gateway.authorize((@order.total*100).to_i, opts)
+      ppx_auth_response = gateway.authorize((@order.total_in_paypal_currency * 100).to_i, opts)
     end
 
     paypal_account = PaypalAccount.find_by_payer_id(params[:PayerID])
@@ -225,7 +233,7 @@ CheckoutController.class_eval do
 
   def order_opts(order, payment_method, stage)
     items = order.line_items.map do |item|
-      price = (item.price * 100).to_i # convert for gateway
+      price = (item.price_in_paypal_currency * 100).to_i # convert for gateway
       { :name        => item.variant.product.name,
         :description => (item.variant.product.description[0..120] if item.variant.product.description),
         :sku         => item.variant.sku,
@@ -243,7 +251,7 @@ CheckoutController.class_eval do
           :description => credit.label,
           :sku         => credit.id,
           :quantity    => 1,
-          :amount      => (credit.amount*100).to_i }
+          :amount      => (credit.amount_in_paypal_currency * 100).to_i }
       end
     end
 
@@ -260,13 +268,13 @@ CheckoutController.class_eval do
              :order_id          => order.number,
              :custom            => order.number,
              :items             => items,
-             :subtotal          => ((order.item_total * 100) + credits_total).to_i,
-             :tax               => ((order.adjustments.map { |a| a.amount if ( a.source_type == 'Order' && a.label == 'Tax') }.compact.sum) * 100 ).to_i,
-             :shipping          => ((order.adjustments.map { |a| a.amount if a.source_type == 'Shipment' }.compact.sum) * 100 ).to_i,
-             :money             => (order.total * 100 ).to_i }
+             :subtotal          => ((order.item_total_in_paypal_currency * 100) + credits_total).to_i,
+             :tax               => ((order.adjustments.map { |a| a.amount_in_paypal_currency if ( a.source_type == 'Order' && a.label == 'Tax') }.compact.sum) * 100 ).to_i,
+             :shipping          => ((order.adjustments.map { |a| a.amount_in_paypal_currency if a.source_type == 'Shipment' }.compact.sum) * 100 ).to_i,
+             :money             => (order.total_in_paypal_currency * 100 ).to_i }
              
-      # add correct tax amount by subtracting subtotal and shipping otherwise tax = 0 -> need to check adjustments.map
-      opts[:tax] = (order.total*100).to_i - opts.slice(:subtotal, :shipping).values.sum
+      # add correct shipping amount by subtracting subtotal and tax otherwise tax = 0 -> need to check adjustments.map
+      opts[:shipping] = (order.total_in_paypal_currency * 100).to_i - opts.slice(:subtotal, :tax).values.sum
 
     if stage == "checkout"
       opts[:handling] = 0
@@ -277,7 +285,7 @@ CheckoutController.class_eval do
       #hack to add float rounding difference in as handling fee - prevents PayPal from rejecting orders
       #because the integer totals are different from the float based total. This is temporary and will be
       #removed once Spree's currency values are persisted as integers (normally only 1c)
-      opts[:handling] =  (order.total*100).to_i - opts.slice(:subtotal, :tax, :shipping).values.sum
+      opts[:handling] =  (order.total_in_paypal_currency * 100).to_i - opts.slice(:subtotal, :tax, :shipping).values.sum
     end
 
     opts
@@ -294,8 +302,8 @@ CheckoutController.class_eval do
           :name       => "#{order.ship_address.firstname} #{order.ship_address.lastname}",
           :address1   => order.ship_address.address1,
           :address2   => order.ship_address.address2,
-          :city       => order.ship_address.city,
-          :state      => order.ship_address.state.nil? ? order.ship_address.state_name.to_s : order.ship_address.state.abbr,
+          :city       => order.ship_address.city.nil? ? order.ship_address.city_name.to_s : order.ship_address.city.name,
+          :state      => order.ship_address.state.nil? ? order.ship_address.state_name.to_s : order.ship_address.state.name,
           :country    => order.ship_address.country.iso,
           :zip        => order.ship_address.zipcode,
           :phone      => order.ship_address.phone
